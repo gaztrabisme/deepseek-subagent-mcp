@@ -154,6 +154,19 @@ question is a no, and re-asking on another channel would only double the wait.
 
 Set `DSA_SUPERVISOR=off` to disable the gate entirely.
 
+What the supervisor is shown is structured facts, never the child's prose: the tool, the programs
+in each pipeline segment, and every path the command names with an inside-or-outside-the-workspace
+flag. The child writes both the command and any justification for it, and a child that can argue
+its own case will. A path that cannot be resolved statically — `$TMPDIR/out.txt` — is reported as
+unresolved rather than guessed at, and counts as outside.
+
+`examples/claude_supervisor.py` runs the whole pattern against a real Claude, for clients that do
+not advertise `sampling` themselves:
+
+```sh
+DEEPSEEK_API_KEY=sk-... uv run python examples/claude_supervisor.py
+```
+
 ## Ceilings and cost
 
 A delegated agent spends your money in a loop, so four independent ceilings bound
@@ -237,7 +250,7 @@ These come from the Harness SDK wire protocol, not from choices made here.
 
 ```sh
 uv sync
-uv run pytest                  # 124 tests, no API key, no network
+uv run pytest                  # 127 tests, no API key, no network
 uv run ruff check .
 uv run deepseek-subagent-mcp   # starts on stdio; a client drives it
 ```

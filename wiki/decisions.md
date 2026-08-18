@@ -333,3 +333,42 @@ terminal, and retries on the next reaper pass otherwise.
 
 Neither had been observed. Both are the kind that surface once, in production, as a run that
 vanished.
+
+## D20 — An escalation must carry what the decision turns on
+
+Running the supervisor pattern with a real Claude (`examples/claude_supervisor.py`) produced a
+denial whose stated reason was a finding in itself:
+
+> The facts give no visibility into the actual command text or file paths targeted by this
+> compound `cat`, so it can't be confirmed as workspace-scoped.
+
+It was right. `classify_bash` returned at the `if compound:` check *before* computing any path
+information, so a compound line escalated carrying `programs` and `compound: true` and nothing
+else. The supervisor was handed the least evidence in exactly the case needing the most, and a
+careful supervisor answers that by denying. The gate still failed safe — but it was denying from
+ignorance, which is indistinguishable from denying for cause and produces the same noise whatever
+the child asked for.
+
+Path facts are now computed for every bash call, before any early return:
+
+| Fact | Meaning |
+|---|---|
+| `paths` | every path the command names, resolved, each flagged inside or outside the workspace |
+| `redirect_targets_outside` | redirect destinations that leave the workspace, compound lines included |
+
+This does not weaken the "no child prose" invariant. A resolved path is structure; the child's
+sentences about why it wants the path are not, and still never travel.
+
+**An unexpanded variable is reported unresolved, not guessed.** `$TMPDIR/out.txt` is not a
+relative path, and resolving it as one would report a write to `/etc` as safely inside the
+workspace. It is reported as `{"path": "$TMPDIR/out.txt", "resolved": false}` and counted as
+outside — a destination nobody can determine is not one anybody should approve.
+
+The same two calls, before and after, with Claude Sonnet supervising:
+
+| Call | Before | After |
+|---|---|---|
+| `printf … && pytest && python3 wordcount.py sample.txt` | allow, "no signs of credential access" | allow, "all paths are inside the workspace" |
+| `cat > $TMPDIR/summary.txt` | deny, "no visibility into … file paths" | deny, "redirects output to a path outside the workspace" |
+
+Same outcomes. The difference is that both are now decisions rather than one shrug and one guess.

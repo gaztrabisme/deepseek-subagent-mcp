@@ -18,7 +18,7 @@ transcript.
 
 ```sh
 uv sync
-uv run pytest                                     # 124 unit tests, no API key, no network
+uv run pytest                                     # 127 unit tests, no API key, no network
 uv run ruff check .
 uv run pytest tests/test_guard.py -q              # the classifier alone
 uv run pytest tests/test_runs.py::test_run_deadline_kills_the_agent
@@ -142,6 +142,11 @@ call.
    the hook command is what makes the server-side lookup possible.
 4. **A read-only verb is not a read-only call.** `cat ~/.ssh/id_rsa` is `cat`. Sensitive paths are
    refused whatever the command, before the per-command rules get a say.
+5. **An escalation carries the paths the decision turns on.** `_path_facts` runs before every
+   early return in `classify_bash`, so a compound line does not escalate with `compound: true` and
+   nothing else — a supervisor handed no evidence denies from ignorance. Paths are structure and
+   are safe to show; the child's sentences about them are not. An unexpanded `$VAR` is reported
+   `resolved: false` and treated as outside, never resolved as if it were relative.
 
 ## Constraints that shaped the design
 

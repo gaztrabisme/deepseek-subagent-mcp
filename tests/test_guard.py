@@ -141,7 +141,37 @@ def test_facts_never_carry_child_prose(ws):
     assert set(v.facts) <= {"tool", "command_length", "compound", "programs",
                             "delete_targets", "redirect_targets_outside", "module",
                             "scripts", "scripts_outside_workspace", "path",
-                            "inside_workspace", "sensitive_path", "segments"}
+                            "inside_workspace", "sensitive_path", "segments", "paths"}
+
+
+# --- an escalation must carry what the decision turns on -------------------
+
+
+def test_an_escalating_command_names_the_paths_it_touches(ws):
+    """A supervisor asked to rule on a write must be told where it writes.
+
+    Compound lines used to escalate carrying only `compound: true`, which a
+    careful supervisor answers by denying -- observed live, in those words.
+    """
+    verdict = classify("bash", {"command": "cp notes.txt /etc/notes.txt && echo ok"}, ws)
+    assert verdict.action != ALLOW
+    paths = verdict.facts["paths"]
+    assert {"path": "/etc/notes.txt", "inside_workspace": False} in paths
+
+
+def test_an_unexpanded_variable_is_reported_unresolved_not_guessed(ws):
+    """`$TMPDIR/x` is not a relative path, and resolving it would claim it is."""
+    verdict = classify("bash", {"command": "cat > $TMPDIR/out.txt && echo done"}, ws)
+    assert verdict.action != ALLOW
+    assert verdict.facts["paths"] == [{"path": "$TMPDIR/out.txt", "resolved": False}]
+    # A destination nobody can determine is not one anybody should approve.
+    assert verdict.facts["redirect_targets_outside"] == ["$TMPDIR/out.txt"]
+
+
+def test_a_redirect_outside_is_named_even_inside_a_compound_line(ws):
+    verdict = classify("bash", {"command": "echo x > /etc/hosts | true"}, ws)
+    assert verdict.action != ALLOW
+    assert verdict.facts["redirect_targets_outside"] == ["/etc/hosts"]
 
 
 # --- a read-only verb applied to a secret is not a read-only call ----------

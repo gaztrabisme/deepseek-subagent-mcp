@@ -144,6 +144,13 @@ def classify_bash(command: str, workspace: Path) -> Verdict:
     compound = bool(COMPOUND.search(command))
     facts["compound"] = compound
 
+    # Populate the path facts BEFORE any early return. A compound line escalates
+    # on the next few lines, and an escalation that carries only "compound: true"
+    # asks the supervisor to judge blind -- which a careful one answers by
+    # denying. Paths are structure, not the child's prose, so they are safe to
+    # show and they are exactly what the decision turns on.
+    _path_facts(argv, command, workspace, facts)
+
     # Every executable named anywhere in the line, so a pipeline cannot hide a
     # dangerous tail behind a harmless head.
     heads = _command_heads(command)
@@ -169,11 +176,11 @@ def classify_bash(command: str, workspace: Path) -> Verdict:
             if sub and sub not in GIT_READ_ONLY:
                 return Verdict(ESCALATE, f"`git {sub}` changes repository state", facts)
 
+    if facts.get("redirect_targets_outside"):
+        return Verdict(ESCALATE, "redirects output outside the workspace", facts)
+
     if compound:
         return Verdict(ESCALATE, "compound command line", facts)
-
-    if _redirects_outside(command, workspace, facts):
-        return Verdict(ESCALATE, "redirects output outside the workspace", facts)
 
     base = PurePosixPath(argv[0]).name
     if base in READ_ONLY:
@@ -218,6 +225,44 @@ def _classify_interpreter(base: str, argv: list[str], workspace: Path, facts: di
         return Verdict(ESCALATE, f"`{base}` running a script outside the workspace", facts)
     facts["scripts"] = scripts
     return Verdict(ALLOW, f"`{base}` running workspace code", facts)
+
+
+# A word carrying an unexpanded shell variable or a command substitution cannot
+# be resolved statically, and resolving it anyway produces a confident lie --
+# `$TMPDIR/x` looks like a relative path and would be reported as inside the
+# workspace. Say "unresolved" instead; that is the fact the supervisor needs.
+UNEXPANDED = re.compile(r"[$`]")
+
+
+def _looks_like_a_path(word: str) -> bool:
+    # A bare `sample.txt` counts: telling the supervisor the file sits inside the
+    # workspace is what turns a blind ruling into an informed one.
+    return "/" in word or word.startswith(".") or "." in word
+
+
+def _describe_path(word: str, workspace: Path) -> dict[str, object]:
+    if UNEXPANDED.search(word):
+        return {"path": word, "resolved": False}
+    path = Path(word).expanduser()
+    if not path.is_absolute():
+        path = workspace / path
+    return {"path": str(path), "inside_workspace": inside(path, workspace)}
+
+
+def _path_facts(argv: list[str], command: str, workspace: Path, facts: dict) -> None:
+    """Every path this command names, resolved where that is honest.
+
+    Runs for every bash call, including the compound ones that escalate, so the
+    supervisor is never asked to rule on a write without being told where.
+    """
+    named = [
+        _describe_path(word, workspace)
+        for word in argv[1:]
+        if not word.startswith("-") and _looks_like_a_path(word)
+    ]
+    if named:
+        facts["paths"] = named[:12]
+    _redirects_outside(command, workspace, facts)
 
 
 def _sensitive_argument(argv: list[str], workspace: Path) -> tuple[Path, str] | None:
@@ -294,13 +339,14 @@ def _redirects_outside(command: str, workspace: Path, facts: dict) -> bool:
     targets = re.findall(r"(?<!\d)>{1,2}\s*([^\s;|&]+)", command)
     outside = []
     for raw in targets:
-        path = Path(raw.strip("\"'")).expanduser()
-        if str(path) in ("/dev/null", "/dev/stdout", "/dev/stderr"):
+        word = raw.strip("\"'")
+        if word in ("/dev/null", "/dev/stdout", "/dev/stderr"):
             continue
-        if not path.is_absolute():
-            path = workspace / path
-        if not inside(path, workspace):
-            outside.append(str(path))
+        described = _describe_path(word, workspace)
+        # Unresolvable counts as outside: a destination nobody can determine is
+        # not a destination anyone should have approved.
+        if not described.get("inside_workspace", False):
+            outside.append(described["path"])
     if outside:
         facts["redirect_targets_outside"] = outside
         return True
