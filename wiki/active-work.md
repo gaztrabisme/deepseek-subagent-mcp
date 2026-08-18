@@ -23,7 +23,7 @@ across Python 3.11 / 3.12 / 3.13.
 | stderr logging on every failure path | done |
 | Packaging, ruff, GitHub Actions CI | done |
 | Escalation ladder, both tiers | done, live-verified |
-| Unit tests | 121 passing, ruff clean |
+| Unit tests | 124 passing, ruff clean |
 | Live smoke scripts | 6, all passing |
 
 ## Next, in the order I would do it
@@ -50,10 +50,13 @@ On macOS 26.5.2 / arm64 / Python 3.11.5, against `deepseek-v4-pro`:
 
 - Runtime cold boot 6.7s. One-word turn 1.2s. FizzBuzz task with a file write, two bash calls and
   a passing verification 7.8s / 8,435 tokens / 3 steps. Follow-up turn in the same session 8.6s.
-- **Chars per token 3.54**, from 2,033 characters against 575 provider-reported output tokens.
-  `DSA_CHARS_PER_TOKEN` defaults to 3.50, so the cap is now calibrated rather than guessed. Worth
-  re-measuring if the model or `reasoningEffort` changes.
-- Distillation: an 8,438-character report became a 2,033-character seven-section handoff in 52.0s.
+- **Chars per token: 3.54 and 3.46**, from two distillation turns (2,033 chars / 575 output
+  tokens, and 1,910 chars / 552). `DSA_CHARS_PER_TOKEN` defaults to 3.50, which sits between them,
+  so the cap is calibrated rather than guessed. Two samples, not a distribution — re-measure if
+  the model or `reasoningEffort` changes, and note that the logged ratio only covers distillation
+  output, which is more structured than prose.
+- Distillation: an 8,438-character report became a 2,033-character seven-section handoff in 52.0s;
+  a second run, 7,991 chars into 1,910, using 20,560 tokens over 5 steps.
 - Sandbox (D10): `write` to `$HOME` **denied**; `echo > $HOME/...` via bash **succeeded**;
   write inside the workspace succeeded.
 - Supervisor (D12): `ls -la` and `python3 hello.py` allowed by policy with no model involved;

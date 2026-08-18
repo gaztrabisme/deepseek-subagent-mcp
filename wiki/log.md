@@ -128,6 +128,6 @@ a client that loses sampling degrades to asking the operator instead of denying 
 
 ### Verification state
 
-121 unit tests, ruff clean, CI green on both platforms and all three Python versions. Six live
+124 unit tests, ruff clean, CI green on both platforms and all three Python versions. Six live
 smoke scripts, all passing: `smoke_mcp.py`, `smoke_task.py`, `smoke_result.py`,
 `smoke_escalation.py`, `smoke_limits.py`, `smoke_supervisor.py`.
