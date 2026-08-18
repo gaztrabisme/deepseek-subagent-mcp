@@ -1,0 +1,57 @@
+[project]
+name = "deepseek-subagent-mcp"
+version = "0.2.0"
+description = "Expose DeepSeek Harness as a delegatable subagent to any MCP client (Claude Code, Codex, ...)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["mcp", "deepseek", "harness", "subagent", "agent", "claude-code", "codex"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  # MCPServer lives in mcp 2.x; 1.x had mcp.server.fastmcp.FastMCP.
+  "mcp>=2.0.0",
+  # Pinned: upstream is a developer preview that shipped two release
+  # candidates inside a week, and the JSON-RPC wire is not yet stable.
+  "deepseek-harness-sdk==0.1.0rc7",
+]
+
+[project.scripts]
+deepseek-subagent-mcp = "deepseek_subagent_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/gaztrabisme/deepseek-subagent-mcp"
+Issues = "https://github.com/gaztrabisme/deepseek-subagent-mcp/issues"
+"Upstream runtime" = "https://github.com/deepseek-ai/deepseek-harness"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deepseek_subagent_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/deepseek_subagent_mcp/runtime" = "deepseek_subagent_mcp/runtime"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+  # Every broad catch in this codebase is deliberate and logged: a reaper, a
+  # worker thread, and a teardown path must not die on an unexpected exception.
+  "BLE001",
+]

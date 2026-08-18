@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # macos-14 is arm64: deepseek-harness-runtime-bin publishes
+    # macosx_14_0_arm64, manylinux_2_28_x86_64 and manylinux_2_28_aarch64 and
+    # nothing else, so an Intel macOS or Windows runner cannot even resolve the
+    # dependency tree.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync
+        run: uv sync --python ${{ matrix.python }}
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # No API key and no network: the suite replaces the harness with a fake.
+      # The live smokes in tests/smoke_*.py cost real tokens and are not
+      # collected by pytest.
+      - name: Test
+        run: uv run pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
