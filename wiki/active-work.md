@@ -5,7 +5,9 @@ without reading any conversation history.
 
 ## State
 
-Feature-complete against the production plan and live-verified. In a git repository, with CI.
+Feature-complete against the production plan and live-verified. Public at
+`github.com/gaztrabisme/deepseek-subagent-mcp`, CI green on macOS-14 arm64 and Linux x86-64
+across Python 3.11 / 3.12 / 3.13.
 
 | Area | State |
 |---|---|
@@ -20,24 +22,27 @@ Feature-complete against the production plan and live-verified. In a git reposit
 | Tasks-aligned state names, phases, progress reporting | done |
 | stderr logging on every failure path | done |
 | Packaging, ruff, GitHub Actions CI | done |
-| Unit tests | 106 passing, ruff clean |
-| Live smoke scripts | 5, all passing |
+| Escalation ladder, both tiers | done, live-verified |
+| Unit tests | 121 passing, ruff clean |
+| Live smoke scripts | 6, all passing |
 
 ## Next, in the order I would do it
 
-1. **Watch the first CI run.** The matrix is macOS-14 arm64 and Linux x86-64 across Python
-   3.11/3.12/3.13. Nothing in the suite touches the network, but `uv sync` still resolves
-   `deepseek-harness-runtime-bin`, and only three wheels exist.
-2. **Confirm the supervisor tier against a real client.** Add the server to Claude Code and read
-   `dsh_list → supervisor.tier`. Every live proof so far ran at the `deterministic` floor because
-   the stdio test client advertises neither `sampling` nor `elicitation`, which leaves the
-   sampling escalation path untested in anger. One call settles it.
-3. **Measure the classifier's false-positive rate.** A red-team probe modelled on
+1. **Confirm which tier Claude Code itself provides.** The ladder is proved end to end against a
+   client that advertises each capability (`tests/smoke_escalation.py`), so the code is no longer
+   in question — but which rung a real Claude Code session lands on is still unmeasured. Add the
+   server to a client and read `dsh_list → supervisor.tier`. If it reports `deterministic`,
+   escalations deny rather than reaching anyone: safe, but noisier than intended.
+2. **Measure the classifier's false-positive rate.** A red-team probe modelled on
    `GoDucThanh/cockpit/scripts/red_team.py`: adversarial-but-plausible tasks, every escalation
    denied, reporting what the child *attempted* with full arguments.
    `DSA_SUPERVISOR=allow-escalations` exists to benchmark this and is never for real work.
-4. **Decide on PyPI.** Currently install-from-git. Publishing needs a name reservation and a
+3. **Decide on PyPI.** Currently install-from-git. Publishing needs a name reservation and a
    release workflow; `uv build` already runs in CI and uploads the artifact.
+4. **Watch for SEP-2577 removing sampling.** The top rung of the escalation ladder is deprecated
+   as of the 2026-07-28 spec revision. It works today and an erroring tier now falls through to
+   elicitation, so removal degrades rather than breaks — but it will change which tier real
+   clients land on.
 
 ## Measured, not assumed
 
@@ -61,9 +66,8 @@ On macOS 26.5.2 / arm64 / Python 3.11.5, against `deepseek-v4-pro`:
 
 ## Open
 
-- **Which supervisor tier Claude Code actually gets** — see next step 2. If it reports
-  `deterministic` there too, escalations deny rather than reaching a decision-maker: safe, but
-  noisier than intended, and the sampling path is then untested in anger.
+- **Which supervisor tier Claude Code actually gets** — see next step 1. The ladder itself is
+  proved; which rung a real client offers is not.
 - **The classifier's false-positive rate is unmeasured.** Two denials seen in live runs were
   arguably noise: a compound bash line and `sleep`. Both were safe outcomes and the child adapted,
   but the rate matters and nobody has counted it.

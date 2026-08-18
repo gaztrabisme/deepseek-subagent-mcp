@@ -144,7 +144,15 @@ reported by `dsh_list`:
 
 Every tier fails closed. An unreachable supervisor, a timeout, a malformed
 request, or a client that supports neither capability all produce a denial, never
-an approval. Set `DSA_SUPERVISOR=off` to disable the gate entirely.
+an approval.
+
+The ladder is walked rather than picked from once: a tier that *errors* falls
+through to the next one, so a client that drops sampling — deprecated in the
+2026-07-28 spec revision, still working today — degrades to asking you instead of
+denying everything. A tier that *times out* does not fall through; an unanswered
+question is a no, and re-asking on another channel would only double the wait.
+
+Set `DSA_SUPERVISOR=off` to disable the gate entirely.
 
 ## Ceilings and cost
 
@@ -229,7 +237,7 @@ These come from the Harness SDK wire protocol, not from choices made here.
 
 ```sh
 uv sync
-uv run pytest                  # 106 tests, no API key, no network
+uv run pytest                  # 121 tests, no API key, no network
 uv run ruff check .
 uv run deepseek-subagent-mcp   # starts on stdio; a client drives it
 ```
@@ -240,6 +248,7 @@ Live tests need a real key and cost tokens; they are not collected by pytest:
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_task.py        # the product works
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_result.py      # distillation and the archive
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_supervisor.py  # the gate works
+DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_escalation.py  # both escalation tiers
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_limits.py      # reaper and deadline
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_mcp.py         # all six tools
 ```

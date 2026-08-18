@@ -108,3 +108,26 @@ Measured this phase, on macOS 26.5.2 / arm64 / Python 3.11.5 against `deepseek-v
 
 A throwaway API key supplied by Gary was used for live runs. It was passed as a shell environment
 variable and is written to no file in this repository.
+
+### Phase 7 — repository, CI, and the escalation proof
+
+`git init`, first commit, public repo, CI. The first CI run failed exactly one job — `build` —
+because `tool.hatch.build.targets.wheel.force-include` re-added the `runtime/` files that
+`packages = [...]` already ships, and hatchling refuses two files at one archive path. All six
+test jobs passed. That is the build job earning its place on its first run.
+
+Then the gap that had been open since Phase 5 was closed. Every live proof until now ran at the
+`deterministic` floor because the stdio test client advertised neither capability, so the
+escalation path had never actually executed. `tests/smoke_escalation.py` advertises each
+capability in turn and asserts the supervisor calls back into the client. Both tiers work, and
+the payload carries no child prose.
+
+That run also surfaced `MCPDeprecationWarning: The sampling capability is deprecated as of
+2026-07-28 (SEP-2577)` — which prompted D18: the ladder is now walked rather than chosen once, so
+a client that loses sampling degrades to asking the operator instead of denying everything.
+
+### Verification state
+
+121 unit tests, ruff clean, CI green on both platforms and all three Python versions. Six live
+smoke scripts, all passing: `smoke_mcp.py`, `smoke_task.py`, `smoke_result.py`,
+`smoke_escalation.py`, `smoke_limits.py`, `smoke_supervisor.py`.

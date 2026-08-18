@@ -18,7 +18,7 @@ transcript.
 
 ```sh
 uv sync
-uv run pytest                                     # 106 unit tests, no API key, no network
+uv run pytest                                     # 121 unit tests, no API key, no network
 uv run ruff check .
 uv run pytest tests/test_guard.py -q              # the classifier alone
 uv run pytest tests/test_runs.py::test_run_deadline_kills_the_agent
@@ -36,6 +36,7 @@ DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_task.py       # real file writ
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_result.py     # distillation, cap, run archive
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_limits.py     # reaper + run deadline
 DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_supervisor.py # allow/deny through the hook
+DEEPSEEK_API_KEY=sk-... uv run python tests/smoke_escalation.py # sampling + elicitation tiers
 ```
 
 `smoke_supervisor.py` is the one that proves the security story. `smoke_task.py` proves the
@@ -109,13 +110,16 @@ child calls a tool
                        deny  → exit 2 + reason
                        escalate ↓
       tier ladder:  sampling (ctx.session.create_message — the MCP client's model)
-                  → elicitation (ctx.session.elicit — the operator)
+                  → elicitation (ctx.session.elicit_form — the operator)
                   → deterministic (deny)
+      a tier that ERRORS falls through to the next; a tier that TIMES OUT denies
   → exit 0 allows; exit 2 blocks with stderr as the reason the model reads
 ```
 
-The tier is resolved once, on the first tool call, from the client's advertised capabilities, and
-reported by `dsh_list`. The socket runs in the MCPServer lifespan. `supervisor.bind(ctx.session)`
+The whole ladder is resolved once, on the first tool call, from the client's advertised
+capabilities; `dsh_list` reports its head. Sampling is deprecated as of the 2026-07-28 spec
+revision (SEP-2577) and still works, which is exactly why an erroring tier falls through instead
+of denying. The socket runs in the MCPServer lifespan. `supervisor.bind(ctx.session)`
 captures the session because escalation happens on a worker thread's timeline, outside any tool
 call.
 
@@ -166,6 +170,10 @@ These come from the upstream protocol and the shipped binary, not from choices m
   (`packages/sdk/server/src/index.ts:4`), and never attach a stdout log handler here.
 
 ## Testing approach
+
+`tests/test_supervisor.py` drives the ladder with a fake session that advertises whichever
+capabilities the case needs; async tests use the anyio plugin (`pytestmark = pytest.mark.anyio`
+plus an `anyio_backend` fixture), which needs no extra dev dependency.
 
 `tests/test_runs.py` replaces `DeepSeekHarness` with `FakeHarness` via monkeypatch and uses a
 `threading.Event` gate on the fake session so cancellation has something real to interrupt. Tests

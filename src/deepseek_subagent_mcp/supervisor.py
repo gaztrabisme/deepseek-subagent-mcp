@@ -7,8 +7,15 @@ processes, so the hook connects to a unix socket here and blocks on a verdict.
 Three tiers, in order of preference, chosen once at startup and logged:
 
   sampling      ctx.session.create_message -- the MCP client's model decides
-  elicitation   ctx.session.elicit        -- the operator decides
+  elicitation   ctx.session.elicit_form   -- the operator decides
   deterministic no escalation path        -- escalate becomes deny
+
+The ladder is walked, not picked from once. Sampling is deprecated as of the
+2026-07-28 spec revision (SEP-2577) and works today, but a client that drops it
+should degrade to asking the operator rather than to denying everything, so a
+tier that *errors* falls through to the next one. A tier that *times out* does
+not: an unanswered question is a no, and asking again on another channel would
+only double the wait.
 
 Whatever the tier, `guard.classify` runs first and settles the clear cases, so
 the dangerous ones never depend on a model and the routine ones cost nothing.
@@ -64,6 +71,7 @@ class Supervisor:
         self.socket_path = Path(settings.approval_socket)
         self._session: Any = None
         self.tier: str = TIER_DETERMINISTIC
+        self._ladder: list[str] = []
         self.decisions: list[dict[str, Any]] = []
 
     # -- session binding ------------------------------------------------
@@ -77,29 +85,32 @@ class Supervisor:
         if self._session is not None:
             return
         self._session = session
-        self.tier = self._resolve_tier(session)
-        log.info("supervisor tier = %s", self.tier)
+        self._ladder = self._resolve_ladder(session)
+        self.tier = self._ladder[0] if self._ladder else TIER_DETERMINISTIC
+        log.info("supervisor tier = %s (ladder: %s)",
+                 self.tier, " -> ".join([*self._ladder, TIER_DETERMINISTIC]))
 
-    def _resolve_tier(self, session: Any) -> str:
+    def _resolve_ladder(self, session: Any) -> list[str]:
+        """Every escalation channel this client offers, best first."""
         if self.settings.supervisor == "off":
-            return TIER_DETERMINISTIC
+            return []
         check = getattr(session, "check_client_capability", None)
         if check is None:
-            return TIER_DETERMINISTIC
+            return []
+        ladder: list[str] = []
         try:
             if self.settings.supervisor in ("auto", "sampling") and check(
                 ClientCapabilities(sampling=SamplingCapability())
             ):
-                return TIER_SAMPLING
+                ladder.append(TIER_SAMPLING)
             if self.settings.supervisor in ("auto", "elicitation") and check(
                 ClientCapabilities(elicitation=ElicitationCapability())
             ):
-                return TIER_ELICITATION
+                ladder.append(TIER_ELICITATION)
         except Exception:  # noqa: BLE001 - a capability probe must never block startup
-            log.warning("client capability probe failed; falling back to deterministic",
-                        exc_info=True)
-            return TIER_DETERMINISTIC
-        return TIER_DETERMINISTIC
+            log.warning("client capability probe failed; escalation will deny", exc_info=True)
+            return []
+        return ladder
 
     # -- decisions ------------------------------------------------------
 
@@ -128,34 +139,48 @@ class Supervisor:
             resolved = Verdict(ALLOW, f"escalation auto-allowed: {verdict.reason}", verdict.facts)
             self._record(resolved, tier="policy", tool=tool_name, agent_id=agent_id)
             return resolved
-        resolved = await self._escalate(verdict, tool_name, workspace)
-        self._record(resolved, tier=self.tier, tool=tool_name, agent_id=agent_id)
+        resolved, tier = await self._escalate(verdict, tool_name, workspace)
+        self._record(resolved, tier=tier, tool=tool_name, agent_id=agent_id)
         return resolved
 
-    async def _escalate(self, verdict: Verdict, tool_name: str, workspace: Path) -> Verdict:
-        if self._session is None or self.tier == TIER_DETERMINISTIC:
+    async def _escalate(
+        self, verdict: Verdict, tool_name: str, workspace: Path
+    ) -> tuple[Verdict, str]:
+        """Walk the ladder. Returns the verdict and the tier that produced it."""
+        if self._session is None or not self._ladder:
             return Verdict(
                 DENY,
                 f"denied: {verdict.reason} (no supervisor available; escalation fails closed)",
                 verdict.facts,
-            )
+            ), TIER_DETERMINISTIC
         record = {
             "tool": tool_name,
             "workspace": str(workspace),
             "policy_reason": verdict.reason,
             "facts": verdict.facts,
         }
-        try:
-            with anyio.fail_after(self.settings.supervisor_timeout):
-                if self.tier == TIER_SAMPLING:
-                    return await self._ask_model(record, verdict)
-                return await self._ask_human(record, verdict)
-        except TimeoutError:
-            return Verdict(DENY, f"denied: supervisor did not answer within "
-                                 f"{self.settings.supervisor_timeout:g}s", verdict.facts)
-        except Exception as exc:  # noqa: BLE001 - any failure fails closed
-            return Verdict(DENY, f"denied: supervisor unavailable ({type(exc).__name__})",
-                           verdict.facts)
+        failure: Exception | None = None
+        for tier in self._ladder:
+            try:
+                with anyio.fail_after(self.settings.supervisor_timeout):
+                    if tier == TIER_SAMPLING:
+                        return await self._ask_model(record, verdict), tier
+                    return await self._ask_human(record, verdict), tier
+            except TimeoutError:
+                # An unanswered question is a no. Do not re-ask on another channel.
+                return Verdict(
+                    DENY,
+                    f"denied: supervisor did not answer within "
+                    f"{self.settings.supervisor_timeout:g}s",
+                    verdict.facts,
+                ), tier
+            except Exception as exc:  # noqa: BLE001 - try the next tier, then fail closed
+                failure = exc
+                log.warning("escalation via %s failed; trying the next tier", tier, exc_info=True)
+        name = type(failure).__name__ if failure else "unknown"
+        return Verdict(
+            DENY, f"denied: supervisor unavailable ({name})", verdict.facts
+        ), TIER_DETERMINISTIC
 
     async def _ask_model(self, record: dict, verdict: Verdict) -> Verdict:
         from mcp.types import SamplingMessage, TextContent
@@ -180,7 +205,9 @@ class Supervisor:
 
     async def _ask_human(self, record: dict, verdict: Verdict) -> Verdict:
         body = json.dumps(record, indent=2, default=str)
-        result = await self._session.elicit(
+        # elicit() is kept for compatibility and forwards to elicit_form().
+        ask = getattr(self._session, "elicit_form", None) or self._session.elicit
+        result = await ask(
             message=(
                 "A delegated DeepSeek Harness agent proposed a tool call that policy "
                 f"could not classify ({verdict.reason}). Allow it?\n\n{body}"

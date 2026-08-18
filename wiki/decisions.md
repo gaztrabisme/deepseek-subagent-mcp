@@ -278,3 +278,40 @@ wire — the same rule that forbids a stdout-logging plugin in the child's compo
 
 Verdicts log with their tier, tool and agent id, which makes the gate's behaviour readable during
 a live run instead of only afterwards through `dsh_list`.
+
+## D18 — The escalation ladder is walked, not chosen once
+
+Live proof of the escalation tiers surfaced a warning worth acting on:
+
+```
+MCPDeprecationWarning: The sampling capability is deprecated as of 2026-07-28 (SEP-2577).
+```
+
+SEP-2577 deprecates sampling, logging, roots, and client→server progress. Sampling still works —
+it was measured allowing and denying real child tool calls — but the top rung of the ladder is on
+a capability the spec has marked for removal, and the original code treated any escalation failure
+as a denial. A client dropping sampling would therefore have silently degraded the supervisor from
+"asks a model" to "denies everything", which looks identical to working.
+
+The ladder is now walked. A tier that **errors** falls through to the next one, so sampling's
+removal degrades to asking the operator. A tier that **times out** does not fall through: an
+unanswered question is a no, and re-asking on another channel would only double the wait before
+the same answer. `dsh_list` reports the head of the ladder; the log line reports all of it.
+
+`elicit()` is also now called through `elicit_form()` where the session offers it — upstream keeps
+`elicit` as a compatibility shim that forwards to it.
+
+### Both tiers are now proved, not assumed
+
+`tests/smoke_escalation.py` runs a client that advertises each capability in turn and asserts the
+supervisor calls back into it. Previously every live proof ran at the `deterministic` floor,
+because the stdio test client advertised neither — so the escalation path had never executed.
+
+| Tier | Result |
+|---|---|
+| `sampling` | tier resolved, model consulted, `ALLOW` let the child's command run |
+| `elicitation` | tier resolved, operator consulted, `DENY` blocked it |
+
+The payload handed over in both cases: tool, workspace, policy reason, and structured facts —
+`command_length: 25`, `compound: true`, `programs: ["echo", "echo"]`. No command text, no prose.
+The test asserts that directly.
