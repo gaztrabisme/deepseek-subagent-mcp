@@ -138,9 +138,29 @@ reported by `dsh_list`:
 
 | Tier | Who decides | Requires |
 |---|---|---|
+| `agent` | a reviewer process you configure | `DSA_SUPERVISOR=agent` |
 | `sampling` | the MCP client's model | client advertises `sampling` |
 | `elicitation` | you, in your client | client advertises `elicitation` |
 | `deterministic` | nobody — escalation denies | always available |
+
+**Running unattended.** Claude Code advertises `elicitation` and not `sampling`, so out of the
+box every escalation interrupts a person — wrong for an agent meant to work while you do
+something else. `DSA_SUPERVISOR=agent` puts a local reviewer in that seat instead:
+
+```sh
+DSA_SUPERVISOR=agent                        # nothing prompts a human
+DSA_SUPERVISOR_CMD="claude -p --model sonnet"   # any CLI reading a prompt on stdin
+```
+
+The reviewer gets the same structured facts and answers ALLOW or DENY on its first line.
+Anything else denies. It costs a subprocess and roughly eight seconds per escalation, and spends
+tokens on whatever account that CLI is logged into.
+
+**A reviewer is a judgement, not a boundary.** Given `cp note.txt $TMPDIR/copy.txt`, with the facts
+correctly reporting the destination as unresolvable, a Claude reviewer reasoned that `$TMPDIR` "is
+the same OS temp root the workspace lives under" and allowed it. The write landed outside the
+workspace. That class of call is now refused by rule before any reviewer sees it — which is the
+right division of labour: rules hold the boundary, the reviewer handles the grey area inside it.
 
 Every tier fails closed. An unreachable supervisor, a timeout, a malformed
 request, or a client that supports neither capability all produce a denial, never
@@ -236,7 +256,8 @@ Every setting is an environment variable on the server process.
 | `DSA_SUMMARY_TOKENS` | `2000` | Result size above which the child is asked to distil. |
 | `DSA_CHARS_PER_TOKEN` | `3.5` | Conversion used for that cap. Measured at 3.54 on this workload. |
 | `DSA_VERIFY_TIMEOUT` | `300` | Seconds the verification command may run, capped by the run's remaining deadline. |
-| `DSA_SUPERVISOR` | `auto` | `auto` / `sampling` / `elicitation` / `off`. |
+| `DSA_SUPERVISOR` | `auto` | `auto` / `agent` / `sampling` / `elicitation` / `allow-escalations` / `off`. |
+| `DSA_SUPERVISOR_CMD` | `claude -p --model sonnet` | Reviewer for `DSA_SUPERVISOR=agent`. Reads the prompt on stdin. |
 | `DSA_SUPERVISOR_TIMEOUT` | `120` | Seconds to wait for a verdict before denying. |
 | `DSA_SANDBOX_MODE` | `workspace-write` | `read-only`, `workspace-write`, or `danger-full-access`. |
 | `DSA_REASONING_EFFORT` | `low` | `off` / `low` / `high` / `max`. Drives cost hard. |
@@ -277,7 +298,7 @@ These come from the Harness SDK wire protocol, not from choices made here.
 
 ```sh
 uv sync
-uv run pytest                  # 137 tests, no API key, no network
+uv run pytest                  # 153 tests, no API key, no network
 uv run ruff check .
 uv run deepseek-subagent-mcp   # starts on stdio; a client drives it
 ```

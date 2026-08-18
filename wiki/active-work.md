@@ -24,16 +24,16 @@ across Python 3.11 / 3.12 / 3.13.
 | Packaging, ruff, GitHub Actions CI | done |
 | Escalation ladder, both tiers | done, live-verified |
 | Decision/run trace + report script | done, live-verified |
-| Unit tests | 137 passing, ruff clean |
+| `agent` reviewer tier (unattended supervision) | done, live-verified |
+| Unit tests | 153 passing, ruff clean |
 | Live smoke scripts | 6, all passing |
 
 ## Next, in the order I would do it
 
-1. **Cut false positives, now that the supervisor is a person.** Claude Code advertises
-   `elicitation` and not `sampling` (measured, 2026-08-18), so every escalation interrupts the
-   operator with a prompt. That changes the economics completely: a false positive is no longer
-   ~7 seconds of latency, it is a human being asked a question they did not need to answer.
-   `sleep` is the known offender. Read the trace, find the rest.
+1. **Cut false positives.** With `DSA_SUPERVISOR=agent` a false positive costs ~8 seconds and a
+   reviewer call; with the default `auto` on Claude Code it costs a human interruption, because
+   that client offers `elicitation` and not `sampling` (D22). `sleep` is the known offender. Read
+   the trace and find the rest.
 2. **Keep reading the trace.** `scripts/trace_report.py` now measures the escalation rate and
    names what escalated, and its first run already moved one class of false positive into a rule
    (D21, compound lines). The sample is tiny — seven verdicts. Run it after any real session and
@@ -72,6 +72,15 @@ On macOS 26.5.2 / arm64 / Python 3.11.5, against `deepseek-v4-pro`:
   first is reaped, and the first run stays readable through the archive.
 - Deadline: with `DSA_RUN_TIMEOUT=15` and the gate off, a `sleep 400` task ends `failed` with the
   timeout reason and leaks no runtime process.
+
+## Known weakness
+
+**A model reviewer can be argued out of the right answer.** Given `cp note.txt $TMPDIR/copy.txt`
+and facts correctly reporting the destination as unresolvable, a Claude reviewer decided `$TMPDIR`
+was "the same OS temp root the workspace lives under" and allowed it; the write landed outside the
+workspace (D23). That specific class is now a deterministic refusal, but the general lesson stands
+and is not fully mitigated: **anything left to a reviewer can be talked past.** Every boundary that
+matters belongs in `guard.py`, with the reviewer confined to genuine judgement calls.
 
 ## Open
 

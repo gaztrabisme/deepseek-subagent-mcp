@@ -63,6 +63,17 @@ NEVER = frozenset({
 INTERPRETERS = frozenset({"python", "python3", "node", "ruby", "perl", "deno", "bun", "tsx"})
 INLINE_CODE_FLAGS = frozenset({"-c", "-e", "--eval", "--eval-file", "-p"})
 
+# Commands whose whole purpose is to put bytes somewhere. For these the
+# destination is the decision, so a destination outside the workspace -- or one
+# that cannot be resolved at all -- is refused outright rather than escalated.
+# Measured: given `cp note.txt $TMPDIR/copy.txt` and facts correctly reporting
+# the target as unresolved, a model reviewer reasoned that $TMPDIR "is the same
+# OS temp root the workspace lives under" and allowed it. The write escaped. A
+# reviewer is a judgement; the workspace boundary needs to be a rule.
+WRITE_COMMANDS = frozenset({
+    "cp", "mv", "tee", "ln", "install", "dd", "truncate", "chmod", "chown", "touch",
+})
+
 # Commands that reach the network and can execute what they fetch.
 NETWORK_FETCH = frozenset({"curl", "wget", "nc", "ncat", "telnet", "ssh", "scp", "sftp", "rsync"})
 
@@ -177,7 +188,16 @@ def classify_bash(command: str, workspace: Path) -> Verdict:
                 return Verdict(ESCALATE, f"`git {sub}` changes repository state", facts)
 
     if facts.get("redirect_targets_outside"):
-        return Verdict(ESCALATE, "redirects output outside the workspace", facts)
+        return Verdict(
+            DENY,
+            "refused: redirects output outside the workspace "
+            f"({', '.join(str(t) for t in facts['redirect_targets_outside'])})",
+            facts,
+        )
+
+    escaping = _escaping_write(heads, facts)
+    if escaping is not None:
+        return Verdict(DENY, f"refused: {escaping}", facts)
 
     if compound:
         return _classify_segments(command, workspace, facts)
@@ -263,6 +283,26 @@ def _path_facts(argv: list[str], command: str, workspace: Path, facts: dict) -> 
     if named:
         facts["paths"] = named[:12]
     _redirects_outside(command, workspace, facts)
+
+
+def _escaping_write(heads: list[str], facts: dict) -> str | None:
+    """A write command aimed outside the workspace, or at a path nobody can resolve."""
+    writers = [PurePosixPath(h).name for h in heads]
+    if not any(w in WRITE_COMMANDS for w in writers):
+        return None
+    for described in facts.get("paths", []):
+        if not described.get("resolved", True):
+            return (
+                f"`{next(w for w in writers if w in WRITE_COMMANDS)}` targets "
+                f"{described['path']}, which cannot be resolved, so it cannot be "
+                "confirmed inside the workspace"
+            )
+        if not described.get("inside_workspace", True):
+            return (
+                f"`{next(w for w in writers if w in WRITE_COMMANDS)}` targets "
+                f"{described['path']}, outside the workspace"
+            )
+    return None
 
 
 def _classify_segments(command: str, workspace: Path, facts: dict) -> Verdict:

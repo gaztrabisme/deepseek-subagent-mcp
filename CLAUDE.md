@@ -18,7 +18,7 @@ transcript.
 
 ```sh
 uv sync
-uv run pytest                                     # 137 unit tests, no API key, no network
+uv run pytest                                     # 153 unit tests, no API key, no network
 uv run ruff check .
 uv run pytest tests/test_guard.py -q              # the classifier alone
 uv run pytest tests/test_runs.py::test_run_deadline_kills_the_agent
@@ -118,7 +118,8 @@ child calls a tool
       guard.classify:  allow → exit 0        (no model, no latency)
                        deny  → exit 2 + reason
                        escalate ↓
-      tier ladder:  sampling (ctx.session.create_message — the MCP client's model)
+      tier ladder:  agent (a local reviewer process — DSA_SUPERVISOR=agent, nobody prompted)
+                  → sampling (ctx.session.create_message — the MCP client's model)
                   → elicitation (ctx.session.elicit_form — the operator)
                   → deterministic (deny)
       a tier that ERRORS falls through to the next; a tier that TIMES OUT denies
@@ -147,11 +148,16 @@ call.
    the hook command is what makes the server-side lookup possible.
 4. **A read-only verb is not a read-only call.** `cat ~/.ssh/id_rsa` is `cat`. Sensitive paths are
    refused whatever the command, before the per-command rules get a say.
-5. **One policy, not two.** The child's commands and the caller's verification command go through
+5. **The rules hold the boundary; the reviewer handles the grey area inside it.** Anything whose
+   safety turns on a fact the classifier already has — a write leaving the workspace, a
+   destination that cannot be resolved — is decided by rule, not escalated. A model reviewer given
+   correct facts (`{"path": "$TMPDIR/x", "resolved": false}`) talked itself into allowing a write
+   that then landed outside the workspace. Escalate judgement calls, never boundary calls.
+6. **One policy, not two.** The child's commands and the caller's verification command go through
    the same `classify_bash`. A compound line is judged segment by segment — escalating them
    wholesale sent `pwd && ls` to a model, measured at 11 seconds — and cross-segment dangers are
    caught before that by `_command_heads`, which sees every segment.
-6. **An escalation carries the paths the decision turns on.** `_path_facts` runs before every
+7. **An escalation carries the paths the decision turns on.** `_path_facts` runs before every
    early return in `classify_bash`, so a compound line does not escalate with `compound: true` and
    nothing else — a supervisor handed no evidence denies from ignorance. Paths are structure and
    are safe to show; the child's sentences about them are not. An unexpanded `$VAR` is reported

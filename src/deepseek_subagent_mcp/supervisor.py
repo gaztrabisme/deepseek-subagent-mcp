@@ -4,11 +4,20 @@ The child cannot reach the MCP client directly — the SDK wire carries three
 methods and no approval message. Hooks, however, run as ordinary local
 processes, so the hook connects to a unix socket here and blocks on a verdict.
 
-Three tiers, in order of preference, chosen once at startup and logged:
+Four tiers, in order of preference, chosen once at startup and logged:
 
+  agent         a local reviewer process -- a model decides, nobody is asked
   sampling      ctx.session.create_message -- the MCP client's model decides
   elicitation   ctx.session.elicit_form   -- the operator decides
   deterministic no escalation path        -- escalate becomes deny
+
+The `agent` tier exists because the two automated rungs are not always
+available. Claude Code advertises elicitation and not sampling, so on that
+client every escalation would interrupt a person -- which is the wrong price for
+a delegated agent that is supposed to run unattended. Pointing DSA_SUPERVISOR at
+`agent` runs a reviewer locally instead: same prompt, same structured facts, no
+human in the loop. It costs a subprocess and a few seconds per escalation, and
+it spends tokens on whatever account the reviewer CLI is logged into.
 
 The ladder is walked, not picked from once. Sampling is deprecated as of the
 2026-07-28 spec revision (SEP-2577) and works today, but a client that drops it
@@ -25,7 +34,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import subprocess
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +48,7 @@ from .config import Settings, log
 from .guard import ALLOW, DENY, ESCALATE, Verdict, classify
 
 TIER_UNRESOLVED = "unresolved"
+TIER_AGENT = "agent"
 TIER_SAMPLING = "sampling"
 TIER_ELICITATION = "elicitation"
 TIER_DETERMINISTIC = "deterministic"
@@ -97,9 +110,13 @@ class Supervisor:
                  self.tier, " -> ".join([*self._ladder, TIER_DETERMINISTIC]))
 
     def _resolve_ladder(self, session: Any) -> list[str]:
-        """Every escalation channel this client offers, best first."""
+        """Every escalation channel available, best first."""
         if self.settings.supervisor == "off":
             return []
+        # An explicitly configured reviewer outranks the client's channels: it
+        # was asked for precisely so nothing has to interrupt a person.
+        if self.settings.supervisor == "agent":
+            return [TIER_AGENT]
         check = getattr(session, "check_client_capability", None)
         if check is None:
             return []
@@ -172,6 +189,8 @@ class Supervisor:
         for tier in self._ladder:
             try:
                 with anyio.fail_after(self.settings.supervisor_timeout):
+                    if tier == TIER_AGENT:
+                        return await self._ask_agent(record, verdict), tier
                     if tier == TIER_SAMPLING:
                         return await self._ask_model(record, verdict), tier
                     return await self._ask_human(record, verdict), tier
@@ -204,13 +223,44 @@ class Supervisor:
             max_tokens=200,
             temperature=0,
         )
-        text = getattr(result.content, "text", "") or ""
-        head, _, tail = text.strip().partition("\n")
-        decided = head.strip().upper()
+        return self._read_answer(
+            getattr(result.content, "text", "") or "", verdict, "supervisor"
+        )
+
+    async def _ask_agent(self, record: dict, verdict: Verdict) -> Verdict:
+        """Hand the facts to a local reviewer process and read its first word."""
+        body = json.dumps(record, indent=2, default=str)
+        prompt = f"{SUPERVISOR_SYSTEM_PROMPT}\n\nProposed tool call:\n{body}"
+        argv = shlex.split(self.settings.supervisor_cmd)
+        answer = await anyio.to_thread.run_sync(
+            partial(self._run_reviewer, argv, prompt)
+        )
+        return self._read_answer(answer, verdict, "reviewer")
+
+    def _run_reviewer(self, argv: list[str], prompt: str) -> str:
+        """Blocking subprocess call. Runs on a worker thread, never the loop."""
+        completed = subprocess.run(
+            argv,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=self.settings.supervisor_timeout,
+        )
+        if completed.returncode != 0:
+            # Raise rather than deny: the ladder then tries the next tier, and
+            # a reviewer that will not start is a broken channel, not a verdict.
+            raise RuntimeError(
+                f"reviewer exited {completed.returncode}: {completed.stderr.strip()[:200]}"
+            )
+        return completed.stdout.strip()
+
+    def _read_answer(self, text: str, verdict: Verdict, who: str) -> Verdict:
+        """ALLOW on the first line allows. Anything else, including noise, denies."""
+        head, _, tail = (text or "").strip().partition("\n")
         reason = tail.strip() or verdict.reason
-        if decided.startswith("ALLOW"):
-            return Verdict(ALLOW, f"supervisor allowed: {reason}", verdict.facts)
-        return Verdict(DENY, f"supervisor denied: {reason}", verdict.facts)
+        if head.strip().upper().startswith("ALLOW"):
+            return Verdict(ALLOW, f"{who} allowed: {reason}", verdict.facts)
+        return Verdict(DENY, f"{who} denied: {reason}", verdict.facts)
 
     async def _ask_human(self, record: dict, verdict: Verdict) -> Verdict:
         body = json.dumps(record, indent=2, default=str)

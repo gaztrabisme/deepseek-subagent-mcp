@@ -81,6 +81,7 @@ class Settings:
     turn_token_budget: int | None
     loop_strikes: int
     supervisor: str
+    supervisor_cmd: str
     supervisor_timeout: float
     approval_socket: str
     log_level: str
@@ -134,11 +135,23 @@ class Settings:
             run_timeout=_float_env("DSA_RUN_TIMEOUT", 1800.0) or 1800.0,
             turn_token_budget=_int_env("DSA_TURN_TOKEN_BUDGET", None),
             loop_strikes=_int_env("DSA_LOOP_STRIKES", 3) or 3,
-            # auto | sampling | elicitation | off | allow-escalations
-            # "off" makes every escalation a denial; "allow-escalations" makes
-            # every escalation an approval and exists only for benchmarking the
-            # classifier's false-positive rate. Never use it for real work.
+            # auto | sampling | agent | elicitation | off | allow-escalations
+            #
+            #   auto              best channel the client offers, then deny
+            #   agent             a local reviewer process decides (DSA_SUPERVISOR_CMD)
+            #   sampling          the client's model decides, if it advertises it
+            #   elicitation       the operator decides, if the client advertises it
+            #   off               no gate at all
+            #   allow-escalations hard rules still deny; the grey area runs
+            #
+            # "agent" is the unattended answer: nothing prompts a human, and
+            # ambiguous calls still get judged rather than waved through.
             supervisor=os.environ.get("DSA_SUPERVISOR") or "auto",
+            # The reviewer for DSA_SUPERVISOR=agent. Any CLI that reads a prompt
+            # on stdin and answers on stdout works; the default is Claude Code
+            # headless. This spends tokens on whatever account it is logged into.
+            supervisor_cmd=os.environ.get("DSA_SUPERVISOR_CMD")
+            or "claude -p --model sonnet",
             supervisor_timeout=_float_env("DSA_SUPERVISOR_TIMEOUT", 120.0) or 120.0,
             approval_socket=os.environ.get("DSA_APPROVAL_SOCKET")
             or str(Path(tempfile.gettempdir()) / f"dsa-approval-{os.getpid()}.sock"),

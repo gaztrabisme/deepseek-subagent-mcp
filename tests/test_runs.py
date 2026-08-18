@@ -104,6 +104,7 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         "turn_token_budget": None,
         "loop_strikes": 3,
         "supervisor": "off",
+        "supervisor_cmd": "true",
         "supervisor_timeout": 120.0,
         "approval_socket": str(tmp_path / "approval.sock"),
         "log_level": "critical",

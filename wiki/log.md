@@ -153,3 +153,25 @@ while the suite still reported all green, because the crash landed after `run.do
 
 137 unit tests, ruff clean. Six live smoke scripts plus `examples/claude_supervisor.py`, which is
 what produced the trace that produced the fix.
+
+### Phase 9 — installed, and what installing it revealed
+
+Registered at user scope and read the tier from a live session: `elicitation`, not `sampling`
+(D22). Every escalation would interrupt a person, which is the wrong price for unattended work —
+so Gary asked whether an agent could review instead. `DSA_SUPERVISOR=agent` now does that, moving
+the mechanism from `examples/claude_supervisor.py` into the server.
+
+The first live run of that tier allowed a write outside the workspace. The facts were right
+(`resolved: false`); the reviewer reasoned that `$TMPDIR` was the workspace's own temp root and
+approved it, and the file landed outside. Fixed by rule rather than by prompt: writes whose
+destination leaves the workspace or cannot be resolved are refused before any reviewer sees them.
+The identical probe now denies in 0.3ms.
+
+Also found by installing: the first `dsh_list` of a session reported `deterministic` because
+`bind()` ran only on delegate/continue. It read as a settled answer and misled its first operator
+inside a minute.
+
+### Verification state
+
+153 unit tests, ruff clean. Six live smokes, `examples/claude_supervisor.py`, and the agent-tier
+probe, all passing.
