@@ -35,6 +35,7 @@ from mcp.types import ClientCapabilities, ElicitationCapability, SamplingCapabil
 from .config import Settings, log
 from .guard import ALLOW, DENY, ESCALATE, Verdict, classify
 
+TIER_UNRESOLVED = "unresolved"
 TIER_SAMPLING = "sampling"
 TIER_ELICITATION = "elicitation"
 TIER_DETERMINISTIC = "deterministic"
@@ -72,7 +73,10 @@ class Supervisor:
         self.registry = registry
         self.socket_path = Path(settings.approval_socket)
         self._session: Any = None
-        self.tier: str = TIER_DETERMINISTIC
+        # Unresolved until a tool call brings a session to read capabilities
+        # from. Reporting DETERMINISTIC before that reads as "escalation will
+        # deny", which is a claim about the client nobody has checked yet.
+        self.tier: str = TIER_UNRESOLVED
         self._ladder: list[str] = []
         self.decisions: list[dict[str, Any]] = []
 
@@ -152,7 +156,7 @@ class Supervisor:
         self, verdict: Verdict, tool_name: str, workspace: Path
     ) -> tuple[Verdict, str]:
         """Walk the ladder. Returns the verdict and the tier that produced it."""
-        if self._session is None or not self._ladder:
+        if self._session is None or not self._ladder:  # unresolved or no channel
             return Verdict(
                 DENY,
                 f"denied: {verdict.reason} (no supervisor available; escalation fails closed)",

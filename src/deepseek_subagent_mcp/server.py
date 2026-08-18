@@ -225,8 +225,12 @@ async def dsh_continue(
 
 
 @app.tool()
-async def dsh_list() -> dict[str, Any]:
+async def dsh_list(ctx: Context = None) -> dict[str, Any]:  # type: ignore[assignment]
     """List every subagent this server owns, with its state, cost, and run history."""
+    # Bind here too, so the reported supervisor tier is the real one on the
+    # first call rather than a placeholder that reads like a resolved answer.
+    if ctx is not None:
+        supervisor.bind(ctx.session)
     agents = [a.info() for a in registry.agents()]
     spent = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0, "steps": 0}
     for info in agents:

@@ -29,11 +29,11 @@ across Python 3.11 / 3.12 / 3.13.
 
 ## Next, in the order I would do it
 
-1. **Confirm which tier Claude Code itself provides.** The ladder is proved end to end against a
-   client that advertises each capability (`tests/smoke_escalation.py`), so the code is no longer
-   in question — but which rung a real Claude Code session lands on is still unmeasured. Add the
-   server to a client and read `dsh_list → supervisor.tier`. If it reports `deterministic`,
-   escalations deny rather than reaching anyone: safe, but noisier than intended.
+1. **Cut false positives, now that the supervisor is a person.** Claude Code advertises
+   `elicitation` and not `sampling` (measured, 2026-08-18), so every escalation interrupts the
+   operator with a prompt. That changes the economics completely: a false positive is no longer
+   ~7 seconds of latency, it is a human being asked a question they did not need to answer.
+   `sleep` is the known offender. Read the trace, find the rest.
 2. **Keep reading the trace.** `scripts/trace_report.py` now measures the escalation rate and
    names what escalated, and its first run already moved one class of false positive into a rule
    (D21, compound lines). The sample is tiny — seven verdicts. Run it after any real session and
@@ -75,8 +75,11 @@ On macOS 26.5.2 / arm64 / Python 3.11.5, against `deepseek-v4-pro`:
 
 ## Open
 
-- **Which supervisor tier Claude Code actually gets** — see next step 1. The ladder itself is
-  proved; which rung a real client offers is not.
+- ~~Which supervisor tier Claude Code actually gets~~ — **answered: `elicitation`.** Installed at
+  user scope and read from a live session. Claude Code offers elicitation and not sampling, so the
+  middle manager is the operator, not a model. Given SEP-2577 deprecated sampling, expect this to
+  stay true. The sampling rung remains proved by `smoke_escalation.py` and useful to clients that
+  do advertise it.
 - **The classifier's false-positive rate is now instrumented but barely sampled.** First
   measurement: 50% of verdicts escalated, which the compound-line fix (D21) took to 28.6% across
   seven verdicts. Seven is nothing. The one clear remaining candidate is `sleep`, which is not on

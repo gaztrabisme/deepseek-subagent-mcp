@@ -13,6 +13,7 @@ from deepseek_subagent_mcp.supervisor import (
     TIER_DETERMINISTIC,
     TIER_ELICITATION,
     TIER_SAMPLING,
+    TIER_UNRESOLVED,
     Supervisor,
 )
 
@@ -116,6 +117,15 @@ def test_the_tier_is_the_best_capability_the_client_offers(
 ):
     supervisor = bound(settings, FakeSession(sampling=sampling, elicitation=elicitation))
     assert supervisor.tier == expected
+
+
+def test_the_tier_is_unresolved_until_a_session_arrives(settings):
+    """Reporting `deterministic` before binding claims escalation will deny.
+
+    Nobody has asked the client anything at that point. dsh_list showed this to
+    a real operator and it read as a settled answer.
+    """
+    assert Supervisor(settings).tier == TIER_UNRESOLVED
 
 
 def test_supervisor_off_never_escalates(tmp_path):

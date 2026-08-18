@@ -428,3 +428,29 @@ does not recurse.
 This is the loop the trace exists to enable: run it, read what it escalated, and move anything
 routine into a rule. The two escalations that survive are a write the supervisor should look at and
 a redirect outside the workspace it should refuse.
+
+## D22 — In Claude Code the supervisor is a person, not a model
+
+Installed at user scope and read from a live session: `dsh_list → supervisor.tier` reports
+**`elicitation`**. Claude Code advertises the elicitation capability and not sampling, so an
+escalation raises a prompt to the operator rather than consulting the client's model.
+
+This had been assumed the other way round. It matters more than a label:
+
+- **A false positive now costs a human interruption**, not ~7 seconds of the child's latency.
+  Everything that reduces the escalation rate — D20's path facts, D21's segment-wise compound
+  handling — is worth more than it looked, and the remaining offenders (`sleep`) are worth chasing.
+- **The automated rung is unreachable from Claude Code.** Sampling still works for clients that
+  advertise it, and `smoke_escalation.py` proves it, but the deprecation in SEP-2577 makes it
+  unlikely to arrive here later.
+- **Delegation is no longer unattended** in the way the README implies for this client. A long
+  autonomous run can stop and wait for a person.
+
+### A reporting bug the same check exposed
+
+The first `dsh_list` of the session reported `tier: "deterministic"`, because `bind()` only ran on
+`dsh_delegate` and `dsh_continue`, and `dsh_list` took no context. That reads as a settled answer —
+"escalation will deny" — when nothing had asked the client anything yet. It misread that way to a
+real operator within a minute of install.
+
+The tier now starts at `unresolved`, and `dsh_list` binds too, so the first call reports the truth.
