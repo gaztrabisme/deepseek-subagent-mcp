@@ -131,3 +131,25 @@ a client that loses sampling degrades to asking the operator instead of denying 
 124 unit tests, ruff clean, CI green on both platforms and all three Python versions. Six live
 smoke scripts, all passing: `smoke_mcp.py`, `smoke_task.py`, `smoke_result.py`,
 `smoke_escalation.py`, `smoke_limits.py`, `smoke_supervisor.py`.
+
+### Phase 8 — the measurement loop
+
+Gary asked whether real runs leave traces worth analysing. The child's side already did, richly:
+`session.jsonl.zstd` holds every tool call with arguments and every hook result with its verdict
+text, exit code and duration. The server's side did not — verdicts, run outcomes and calibration
+samples lived in memory and stderr.
+
+Added `trace.py`, `scripts/trace_report.py`, and `DSA_TRACE`. Then ran the loop once, which is the
+only way to know whether an instrument is any good: it found `pwd && ls` escalating to a model at
+11.2 seconds a call, because compound lines escalated wholesale. Fixed by giving the child's
+commands the same segment-wise judgement the caller's verification command had had since D13 —
+one policy instead of two. Escalation rate 50% → 28.6%, and that call now costs 0.3ms.
+
+A duplicated keyword argument in the first version of `Trace.run` killed the agent's worker thread
+while the suite still reported all green, because the crash landed after `run.done.set()`.
+`Trace.write` now catches everything.
+
+### Verification state
+
+137 unit tests, ruff clean. Six live smoke scripts plus `examples/claude_supervisor.py`, which is
+what produced the trace that produced the fix.

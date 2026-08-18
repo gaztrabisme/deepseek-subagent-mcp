@@ -34,11 +34,18 @@ def test_ordinary_acceptance_commands_are_allowed(command, tmp_path):
 
 
 def test_a_compound_command_is_judged_segment_by_segment(tmp_path):
-    """classify_bash escalates any compound line; an acceptance command needs better."""
+    """One policy, not two: the child's calls and the caller's get the same rules.
+
+    Escalating every compound line wholesale sent `pwd && ls` to a model in a
+    real run -- eleven seconds and a model call to be told what the read-only
+    list already knew.
+    """
     from deepseek_subagent_mcp.guard import classify_bash
 
-    assert classify_bash("pytest -q && ls", tmp_path).action == ESCALATE
+    assert classify_bash("pwd && ls", tmp_path).action == ALLOW
     assert classify_verification("pytest -q && ls", tmp_path).action == ALLOW
+    # A segment the policy cannot settle still stops the whole line.
+    assert classify_bash("pytest -q && some-unknown-binary", tmp_path).action == ESCALATE
 
 
 # Built rather than written out: a literal here is a harmless string that a

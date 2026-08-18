@@ -180,7 +180,7 @@ def classify_bash(command: str, workspace: Path) -> Verdict:
         return Verdict(ESCALATE, "redirects output outside the workspace", facts)
 
     if compound:
-        return Verdict(ESCALATE, "compound command line", facts)
+        return _classify_segments(command, workspace, facts)
 
     base = PurePosixPath(argv[0]).name
     if base in READ_ONLY:
@@ -263,6 +263,36 @@ def _path_facts(argv: list[str], command: str, workspace: Path, facts: dict) -> 
     if named:
         facts["paths"] = named[:12]
     _redirects_outside(command, workspace, facts)
+
+
+def _classify_segments(command: str, workspace: Path, facts: dict) -> Verdict:
+    """Judge a compound line one segment at a time.
+
+    Escalating every compound line wholesale is the safe answer and the wrong
+    one: it sent `pwd && ls` to a model, which cost eleven seconds and a model
+    call to be told what the read-only list already knew. Measured, in a trace.
+
+    The cross-segment dangers do not depend on this -- `curl … | sh`, a `sudo`
+    in the tail, an `rm` anywhere -- because `_command_heads` inspects every
+    segment before this runs. What is left is the question of whether each
+    segment, on its own, is something the policy already allows.
+    """
+    segments = [s.strip() for s in SEGMENTS.split(command) if s.strip()]
+    facts["segments"] = len(segments)
+    # A line whose danger is punctuation rather than a separator -- `$(…)`, a
+    # backtick -- does not split, and recursing on it would never terminate.
+    if len(segments) <= 1:
+        return Verdict(ESCALATE, "compound command line", facts)
+    for segment in segments:
+        verdict = classify_bash(segment, workspace)
+        if verdict.action != ALLOW:
+            merged = {**facts, **verdict.facts, "segments": len(segments)}
+            return Verdict(
+                verdict.action,
+                f"segment `{_clip_command(segment)}`: {verdict.reason}",
+                merged,
+            )
+    return Verdict(ALLOW, f"{len(segments)} segments, each allowed by policy", facts)
 
 
 def _sensitive_argument(argv: list[str], workspace: Path) -> tuple[Path, str] | None:
@@ -398,38 +428,17 @@ SEGMENTS = re.compile(r"\|\||&&|[;|]")
 
 
 def classify_verification(command: str, workspace: Path) -> Verdict:
-    """Classify a caller's verification command, one pipeline segment at a time.
+    """Classify a caller's acceptance command.
 
-    classify_bash escalates any compound line wholesale, which is right for a
-    child that could be hiding a tail behind a harmless head, but useless for an
-    acceptance command -- `pytest -q && ruff check` is exactly the shape a caller
-    writes. Here every segment must classify ALLOW on its own; the first that
-    does not blocks the whole command.
+    This is deliberately the same policy the child's own calls get, rather than
+    a second one that drifts. The caller is another agent and can be prompt
+    injected, so "the caller asked for it" is not authorization; and an
+    acceptance command is shaped exactly like ordinary dev work, which the
+    policy already knows how to read.
     """
     if not command.strip():
         return Verdict(ESCALATE, "empty verification command", {"command": command})
-
-    # Judge the whole line first. Some dangers are cross-segment facts --
-    # `curl … | sh` is fetch-and-execute precisely because of the pipe -- and
-    # splitting before classifying would throw that signal away. Only the
-    # "compound command line" escalation is re-examined segment by segment.
-    whole = classify_bash(command, workspace)
-    if whole.action != ESCALATE:
-        return whole
-
-    segments = [s.strip() for s in SEGMENTS.split(command) if s.strip()]
-    if not segments:
-        return Verdict(ESCALATE, "empty verification command", {"command": command})
-    for segment in segments:
-        verdict = classify_bash(segment, workspace)
-        if verdict.action != ALLOW:
-            return Verdict(
-                verdict.action,
-                f"segment `{_clip_command(segment)}`: {verdict.reason}",
-                {"segments": len(segments), **verdict.facts},
-            )
-    return Verdict(ALLOW, f"{len(segments)} segment(s), all read-only or test runners",
-                   {"segments": len(segments)})
+    return classify_bash(command, workspace)
 
 
 def _clip_command(text: str, limit: int = 60) -> str:

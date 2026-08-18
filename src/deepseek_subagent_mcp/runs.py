@@ -31,6 +31,7 @@ from deepseek_harness import DeepSeekHarness, DeepSeekHarnessConfig, Notificatio
 from deepseek_harness.errors import TransportClosedError
 
 from .config import Settings, log
+from .trace import Trace, open_trace
 from .verify import VerificationResult, run_verification
 
 # Run states, in the MCP Tasks extension's vocabulary so a later migration to it
@@ -353,7 +354,16 @@ class Run:
 class Agent:
     """A live DeepSeek Harness runtime, driven by a serial task queue."""
 
-    def __init__(self, agent_id: str, name: str, workspace: Path, model: str, settings: Settings):
+    def __init__(
+        self,
+        agent_id: str,
+        name: str,
+        workspace: Path,
+        model: str,
+        settings: Settings,
+        trace: Trace | None = None,
+    ):
+        self.trace = trace
         self.agent_id = agent_id
         self.name = name
         self.workspace = workspace
@@ -560,6 +570,8 @@ class Agent:
                 run.finished_at = _now()
                 self.last_activity = run.finished_at
                 run.done.set()
+                if self.trace is not None:
+                    self.trace.run(run, str(self.workspace), self.model)
                 log.info(
                     "run %s %s in %.1fs, %d tokens",
                     run.run_id,
@@ -676,6 +688,13 @@ class Agent:
                 len(text) / produced,
                 self.settings.chars_per_token,
             )
+            if self.trace is not None:
+                self.trace.calibration(
+                    run_id=run.run_id,
+                    chars=len(text),
+                    output_tokens=produced,
+                    assumed=self.settings.chars_per_token,
+                )
         if len(text) > cap:
             text = _truncate(text, cap)
             run.truncated = True
@@ -731,8 +750,11 @@ class Registry:
     caller who delegates, goes away, and comes back can still read the result.
     """
 
-    def __init__(self, settings: Settings, start_reaper: bool = True):
+    def __init__(self, settings: Settings, start_reaper: bool = True, trace: Trace | None = None):
         self.settings = settings
+        self.trace = trace if trace is not None else open_trace(
+            settings.trace, settings.session_root
+        )
         self._agents: dict[str, Agent] = {}
         self._archive: OrderedDict[str, Run] = OrderedDict()
         self._lock = threading.Lock()
@@ -811,6 +833,7 @@ class Registry:
                 workspace=workspace,
                 model=model,
                 settings=self.settings,
+                trace=self.trace,
             )
             self._agents[agent_id] = agent
             return agent

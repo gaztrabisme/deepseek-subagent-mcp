@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -62,8 +63,9 @@ to weigh, and you should not infer intent beyond what the facts state.
 class Supervisor:
     """Owns the socket, the tier decision, and the escalation path."""
 
-    def __init__(self, settings: Settings, registry: Any = None):
+    def __init__(self, settings: Settings, registry: Any = None, trace: Any = None):
         self.settings = settings
+        self.trace = trace
         # The registry is how a verdict resolves the workspace it is judging
         # against. The hook reports one too, but that is a field the supervised
         # side supplies, and the security boundary should not read it.
@@ -131,16 +133,19 @@ class Supervisor:
         workspace: Path,
         agent_id: str | None = None,
     ) -> Verdict:
+        started = time.monotonic()
         verdict = classify(tool_name, tool_input, workspace)
         if verdict.action != ESCALATE:
-            self._record(verdict, tier="policy", tool=tool_name, agent_id=agent_id)
+            self._record(verdict, tier="policy", tool=tool_name, agent_id=agent_id,
+                         started=started)
             return verdict
         if self.settings.supervisor == "allow-escalations":
             resolved = Verdict(ALLOW, f"escalation auto-allowed: {verdict.reason}", verdict.facts)
-            self._record(resolved, tier="policy", tool=tool_name, agent_id=agent_id)
+            self._record(resolved, tier="policy", tool=tool_name, agent_id=agent_id,
+                         started=started)
             return resolved
         resolved, tier = await self._escalate(verdict, tool_name, workspace)
-        self._record(resolved, tier=tier, tool=tool_name, agent_id=agent_id)
+        self._record(resolved, tier=tier, tool=tool_name, agent_id=agent_id, started=started)
         return resolved
 
     async def _escalate(
@@ -224,7 +229,12 @@ class Supervisor:
         return Verdict(DENY, "operator denied", verdict.facts)
 
     def _record(
-        self, verdict: Verdict, tier: str, tool: str = "", agent_id: str | None = None
+        self,
+        verdict: Verdict,
+        tier: str,
+        tool: str = "",
+        agent_id: str | None = None,
+        started: float | None = None,
     ) -> None:
         self.decisions.append({
             "action": verdict.action,
@@ -236,6 +246,16 @@ class Supervisor:
         del self.decisions[:-200]
         log.info("verdict %s [%s] agent=%s tool=%s: %s",
                  verdict.action, tier, agent_id or "-", tool or "-", verdict.reason)
+        if self.trace is not None:
+            self.trace.verdict(
+                agent_id=agent_id,
+                tool=tool,
+                action=verdict.action,
+                tier=tier,
+                reason=verdict.reason,
+                facts=verdict.facts,
+                latency_ms=(time.monotonic() - started) * 1000 if started else 0.0,
+            )
 
     # -- socket ---------------------------------------------------------
 

@@ -111,6 +111,8 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         "verify_timeout": 30.0,
         "chars_per_token": 3.5,
         "run_archive": 200,
+        # Tests never write a trace file; test_trace.py turns it on deliberately.
+        "trace": "off",
     }
     base.update(overrides)
     return Settings(**base)

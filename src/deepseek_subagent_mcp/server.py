@@ -37,7 +37,7 @@ scratch directory rather than anything you cannot afford to have edited.
 
 settings = Settings.from_env()
 registry = Registry(settings)
-supervisor = Supervisor(settings, registry)
+supervisor = Supervisor(settings, registry, trace=registry.trace)
 
 
 @asynccontextmanager
@@ -240,6 +240,7 @@ async def dsh_list() -> dict[str, Any]:
         "default_workspace": str(settings.workspace),
         "tokens_spent": spent,
         "archived_runs": len(registry.archived_runs()),
+        "trace": str(registry.trace.path) if registry.trace.enabled else None,
         "limits": {
             "run_timeout_seconds": settings.run_timeout,
             "idle_timeout_seconds": settings.idle_timeout,
@@ -323,6 +324,8 @@ def main() -> None:
         settings.sandbox_mode,
         settings.supervisor,
     )
+    if registry.trace.enabled:
+        log.info("tracing decisions and runs to %s", registry.trace.path)
     if not settings.api_key:
         print(
             "warning: DEEPSEEK_API_KEY is not set in this server's environment; "

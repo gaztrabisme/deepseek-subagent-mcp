@@ -23,7 +23,8 @@ across Python 3.11 / 3.12 / 3.13.
 | stderr logging on every failure path | done |
 | Packaging, ruff, GitHub Actions CI | done |
 | Escalation ladder, both tiers | done, live-verified |
-| Unit tests | 124 passing, ruff clean |
+| Decision/run trace + report script | done, live-verified |
+| Unit tests | 137 passing, ruff clean |
 | Live smoke scripts | 6, all passing |
 
 ## Next, in the order I would do it
@@ -33,13 +34,18 @@ across Python 3.11 / 3.12 / 3.13.
    in question — but which rung a real Claude Code session lands on is still unmeasured. Add the
    server to a client and read `dsh_list → supervisor.tier`. If it reports `deterministic`,
    escalations deny rather than reaching anyone: safe, but noisier than intended.
-2. **Measure the classifier's false-positive rate.** A red-team probe modelled on
-   `GoDucThanh/cockpit/scripts/red_team.py`: adversarial-but-plausible tasks, every escalation
-   denied, reporting what the child *attempted* with full arguments.
-   `DSA_SUPERVISOR=allow-escalations` exists to benchmark this and is never for real work.
-3. **Decide on PyPI.** Currently install-from-git. Publishing needs a name reservation and a
+2. **Keep reading the trace.** `scripts/trace_report.py` now measures the escalation rate and
+   names what escalated, and its first run already moved one class of false positive into a rule
+   (D21, compound lines). The sample is tiny — seven verdicts. Run it after any real session and
+   move anything routine and frequent out of the escalation list.
+3. **Red-team probe**, still worth doing and still not done: adversarial-but-plausible tasks with
+   every escalation denied, reporting what the child *attempted* with full arguments, modelled on
+   `GoDucThanh/cockpit/scripts/red_team.py`. `DSA_SUPERVISOR=allow-escalations` exists to
+   benchmark against and is never for real work. The trace answers "what did we escalate"; this
+   answers "what would it have done".
+4. **Decide on PyPI.** Currently install-from-git. Publishing needs a name reservation and a
    release workflow; `uv build` already runs in CI and uploads the artifact.
-4. **Watch for SEP-2577 removing sampling.** The top rung of the escalation ladder is deprecated
+5. **Watch for SEP-2577 removing sampling.** The top rung of the escalation ladder is deprecated
    as of the 2026-07-28 spec revision. It works today and an erroring tier now falls through to
    elicitation, so removal degrades rather than breaks — but it will change which tier real
    clients land on.
@@ -71,9 +77,12 @@ On macOS 26.5.2 / arm64 / Python 3.11.5, against `deepseek-v4-pro`:
 
 - **Which supervisor tier Claude Code actually gets** — see next step 1. The ladder itself is
   proved; which rung a real client offers is not.
-- **The classifier's false-positive rate is unmeasured.** Two denials seen in live runs were
-  arguably noise: a compound bash line and `sleep`. Both were safe outcomes and the child adapted,
-  but the rate matters and nobody has counted it.
+- **The classifier's false-positive rate is now instrumented but barely sampled.** First
+  measurement: 50% of verdicts escalated, which the compound-line fix (D21) took to 28.6% across
+  seven verdicts. Seven is nothing. The one clear remaining candidate is `sleep`, which is not on
+  the read-only list and escalates.
+- **Escalation costs ~7-11 seconds** of the child's wall-clock, against 0.3ms for a policy
+  verdict. That ratio is what makes a false positive expensive rather than merely untidy.
 - **`DSA_MAX_STEPS=40` and `DSA_TURN_TOKEN_BUDGET` unset are judgement, not measurement.**
   Observed runs used 3–4 steps and 8k–17k tokens, so 40 is roughly a 10× headroom. Revisit once
   there is a distribution rather than five samples.

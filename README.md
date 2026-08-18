@@ -188,6 +188,32 @@ output, cache reads and writes, and step count — summed from what the provider
 reported. Per-step input is summed deliberately: every request bills the whole
 resent prefix, so the total is what the delegation actually cost.
 
+## Traces, and what to do with them
+
+Every delegation leaves two records.
+
+The child's runtime writes its own durable log — every tool call with arguments,
+every hook invocation with its exit code, duration and the verdict text, token
+usage per step — under `<session root>/<workspace>/<session>/session.jsonl.zstd`.
+
+This server appends its own side to `<session root>/trace.jsonl`: each verdict
+with its tier, latency and the facts the supervisor was shown, each finished run
+with its verification result and usage, and the chars-per-token ratio each
+distillation turn actually produced. Lengths, never the text — the trace is for
+measuring, not for keeping a copy of your source. Set `DSA_TRACE` to move it, or
+`DSA_TRACE=off` to disable it.
+
+```sh
+uv run python scripts/trace_report.py            # reads .dsh-sessions/trace.jsonl
+```
+
+The report answers the questions the defaults were guessed at: how often the
+classifier escalates and on what, whether `DSA_CHARS_PER_TOKEN` matches
+observation, and where `DSA_MAX_STEPS` and `DSA_TURN_TOKEN_BUDGET` sit relative
+to real use. Its first run on this project found `pwd && ls` being escalated to a
+model — eleven seconds and a model call to be told what the read-only list
+already knew — which is now settled by policy in a third of a millisecond.
+
 ## Configuration
 
 Every setting is an environment variable on the server process.
@@ -219,6 +245,7 @@ Every setting is an environment variable on the server process.
 | `DSA_REQUEST_TIMEOUT` | none | Seconds to wait on one runtime request. |
 | `DSA_TRANSCRIPT_LIMIT` | `400` | Activity lines retained per run. |
 | `DSA_LOG_LEVEL` | `info` | Server log level. Writes to stderr only. |
+| `DSA_TRACE` | `<session root>/trace.jsonl` | Decision and run trace. `off` disables it. |
 | `DSA_CORDIS` | the packaged composition | A path, or `bundled` for upstream's minimal config. |
 | `DSA_PROVIDER` | `deepseek-official` | Provider route registered by the composition. |
 
@@ -250,7 +277,7 @@ These come from the Harness SDK wire protocol, not from choices made here.
 
 ```sh
 uv sync
-uv run pytest                  # 127 tests, no API key, no network
+uv run pytest                  # 137 tests, no API key, no network
 uv run ruff check .
 uv run deepseek-subagent-mcp   # starts on stdio; a client drives it
 ```

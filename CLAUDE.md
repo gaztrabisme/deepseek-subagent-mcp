@@ -18,7 +18,7 @@ transcript.
 
 ```sh
 uv sync
-uv run pytest                                     # 127 unit tests, no API key, no network
+uv run pytest                                     # 137 unit tests, no API key, no network
 uv run ruff check .
 uv run pytest tests/test_guard.py -q              # the classifier alone
 uv run pytest tests/test_runs.py::test_run_deadline_kills_the_agent
@@ -69,6 +69,11 @@ chain.
 - **`guard.py`** — deterministic classification of a proposed tool call into allow / deny /
   escalate. Pure, no I/O, heavily tested.
 - **`verify.py`** — classifies then executes the caller's acceptance command.
+- **`trace.py`** — append-only JSONL of verdicts, runs and calibration samples, read back by
+  `scripts/trace_report.py`. Owned by the `Registry` and shared with the `Supervisor`. It runs on
+  the agent's worker thread, so `Trace.write` catches **every** exception: an error escaping there
+  kills that thread, the run whose trace failed still looks fine, and every later run on that
+  agent hangs. Observability is never worth a delegation.
 - **`supervisor.py`** — the unix-socket verdict server and the escalation tiers.
 - **`server.py`** — the six tools. Thin: validates arguments, calls the registry, shapes results.
   Domain behaviour lives in `runs.py`.
@@ -142,7 +147,11 @@ call.
    the hook command is what makes the server-side lookup possible.
 4. **A read-only verb is not a read-only call.** `cat ~/.ssh/id_rsa` is `cat`. Sensitive paths are
    refused whatever the command, before the per-command rules get a say.
-5. **An escalation carries the paths the decision turns on.** `_path_facts` runs before every
+5. **One policy, not two.** The child's commands and the caller's verification command go through
+   the same `classify_bash`. A compound line is judged segment by segment — escalating them
+   wholesale sent `pwd && ls` to a model, measured at 11 seconds — and cross-segment dangers are
+   caught before that by `_command_heads`, which sees every segment.
+6. **An escalation carries the paths the decision turns on.** `_path_facts` runs before every
    early return in `classify_bash`, so a compound line does not escalate with `compound: true` and
    nothing else — a supervisor handed no evidence denies from ignorance. Paths are structure and
    are safe to show; the child's sentences about them are not. An unexpanded `$VAR` is reported

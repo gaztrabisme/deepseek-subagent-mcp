@@ -85,7 +85,10 @@ async def allow_human(**kwargs):
     return Elicited(True)
 
 
-ESCALATES = ("bash", {"command": "echo a && echo b"})  # compound: policy cannot settle it
+# An unrecognised program: the policy has no rule that settles it either way,
+# which is exactly what escalation is for. (A compound line of read-only
+# commands is NOT this -- policy now settles those segment by segment.)
+ESCALATES = ("bash", {"command": "some-unknown-binary --go"})
 
 
 @pytest.fixture

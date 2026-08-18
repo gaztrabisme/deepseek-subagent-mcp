@@ -372,3 +372,59 @@ The same two calls, before and after, with Claude Sonnet supervising:
 | `cat > $TMPDIR/summary.txt` | deny, "no visibility into … file paths" | deny, "redirects output to a path outside the workspace" |
 
 Same outcomes. The difference is that both are now decisions rather than one shrug and one guess.
+
+## D21 — Trace the decisions, then let the trace pick the defaults
+
+The child's runtime already persists a rich durable log: every tool call with arguments, every
+hook invocation with its exit code, duration and the verdict text, token usage per step. What was
+missing was this server's side — which tier answered, what facts it was shown, whether verification
+passed, how much a distilled answer compressed. All of it lived in memory and stderr and died with
+the process, which is why three questions in `active-work.md` had stayed open: the classifier's
+false-positive rate, whether `DSA_CHARS_PER_TOKEN` was calibrated, and whether the ceilings sat
+anywhere near real use.
+
+`trace.py` appends one JSON object per verdict, run and calibration sample to
+`<session root>/trace.jsonl`. `scripts/trace_report.py` reads them back. Lengths are recorded, not
+text: the trace exists to be measured, not to accumulate a copy of somebody's source.
+
+`Trace.write` catches every exception, not just `OSError`. It runs on the agent's worker thread,
+and an exception escaping there kills the thread — the run whose trace failed still completes and
+looks fine, and every later run on that agent hangs. That exact bug appeared during development
+(a duplicated keyword argument) and the suite still reported 137 passed, because the crash landed
+after `run.done.set()`. Observability is never worth a delegation.
+
+### The first report changed the classifier
+
+Two runs of the Claude-supervisor example produced this:
+
+```
+  sampling      3   50.0%   median 10957.1ms
+  policy        3   50.0%   median     0.3ms
+
+  1x  [1 allowed]  supervisor allowed: `pwd` and `ls` are read-only inspection commands
+```
+
+`pwd` and `ls` are both on the read-only list. The line escalated because it was *compound*, and
+`classify_bash` escalated every compound line wholesale. Eleven seconds and a model call to be told
+what the policy already knew — and the same tax on every compound line a delegated agent writes,
+which is most of them.
+
+The fix was already in the file. `classify_verification` had judged caller commands segment by
+segment since D13; the child's commands now get the same treatment. That is a simplification as
+well as a fix: one policy rather than two that could drift, and `classify_verification` reduces to
+an empty-check plus `classify_bash`.
+
+Nothing was loosened. The cross-segment dangers — `curl … | sh`, a `sudo` in the tail, an `rm`
+anywhere, a secret named in any segment — are all caught by `_command_heads` *before* the compound
+check, and tests pin each one. A line that does not split (`echo $(whoami)`) still escalates, and
+does not recurse.
+
+| | before | after |
+|---|---|---|
+| escalation rate | 50.0% | 28.6% |
+| `pwd && ls` | 11.2s, one model call | 0.3ms, no model |
+| remaining escalations | 3 | 2, both genuine |
+
+This is the loop the trace exists to enable: run it, read what it escalated, and move anything
+routine into a rule. The two escalations that survive are a write the supervisor should look at and
+a redirect outside the workspace it should refuse.

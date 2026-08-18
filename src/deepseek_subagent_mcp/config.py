@@ -88,6 +88,7 @@ class Settings:
     verify_timeout: float
     chars_per_token: float
     run_archive: int
+    trace: str | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -153,6 +154,9 @@ class Settings:
             # it can be replaced with a measurement rather than another guess.
             chars_per_token=_float_env("DSA_CHARS_PER_TOKEN", 3.5) or 3.5,
             run_archive=_int_env("DSA_RUN_ARCHIVE", 200) or 200,
+            # Where the decision/run trace is appended. Unset writes it under
+            # the session root; "off" disables it. Never stdout.
+            trace=os.environ.get("DSA_TRACE"),
         )
 
     @property
