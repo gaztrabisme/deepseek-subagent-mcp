@@ -100,6 +100,23 @@ def test_a_timeout_fails_rather_than_hanging(tmp_path):
     assert "timed out" in result.reason
 
 
+def test_the_run_deadline_outranks_the_verify_timeout(tmp_path):
+    """A slow check must not outlive the run whose deadline the reaper watches."""
+    settings = make_settings(tmp_path, verify_timeout=300.0)
+    (tmp_path / "slow.py").write_text("import time; time.sleep(30)")
+    result = run_verification("python3 slow.py", tmp_path, settings, budget=0.5)
+    assert result.passed is False
+    assert "remaining deadline" in result.reason
+    assert result.duration_seconds < 5, "it waited on DSA_VERIFY_TIMEOUT instead"
+
+
+def test_a_generous_budget_leaves_the_configured_timeout_alone(tmp_path):
+    settings = make_settings(tmp_path, verify_timeout=0.5)
+    (tmp_path / "slow.py").write_text("import time; time.sleep(30)")
+    result = run_verification("python3 slow.py", tmp_path, settings, budget=9999)
+    assert "DSA_VERIFY_TIMEOUT" in result.reason
+
+
 def test_an_empty_command_is_reported_not_executed(settings, tmp_path):
     result = run_verification("   ", tmp_path, settings)
     assert result.passed is False

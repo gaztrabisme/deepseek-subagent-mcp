@@ -18,7 +18,7 @@ transcript.
 
 ```sh
 uv sync
-uv run pytest                                     # 121 unit tests, no API key, no network
+uv run pytest                                     # 124 unit tests, no API key, no network
 uv run ruff check .
 uv run pytest tests/test_guard.py -q              # the classifier alone
 uv run pytest tests/test_runs.py::test_run_deadline_kills_the_agent
@@ -85,6 +85,10 @@ task turn (session.run)
   → verification   run_verification(): classify, then execute, exit code decides the state
   → distillation   one further session.run in the SAME session, only if the answer overflows
 ```
+
+The pipeline must always finish before the reaper acts on the run, because a kill does not reach
+a subprocess the worker thread is blocked in. Verification is therefore capped by the run's
+remaining deadline, and `_evict_closed` refuses to evict an agent whose runs are not all terminal.
 
 `run.phase` (`queued` / `running` / `verifying` / `distilling` / `done`) reports which stage is
 live; `run.state` uses the MCP Tasks vocabulary (`working` / `completed` / `completed_unverified`

@@ -49,8 +49,19 @@ class VerificationResult:
         return out
 
 
-def run_verification(command: str, workspace: Path, settings: Settings) -> VerificationResult:
-    """Classify, then execute, then report. Never raises."""
+def run_verification(
+    command: str, workspace: Path, settings: Settings, budget: float | None = None
+) -> VerificationResult:
+    """Classify, then execute, then report. Never raises.
+
+    `budget` is the seconds left on the run's own deadline. Without it a slow
+    command can still be running when the reaper decides the run is overdue,
+    and the reaper's kill does not reach a subprocess this thread is blocked in
+    -- so the run would outlive its own agent. The shorter of the two wins.
+    """
+    timeout = settings.verify_timeout
+    if budget is not None:
+        timeout = max(1.0, min(timeout, budget))
     command = (command or "").strip()
     if not command:
         return VerificationResult(command, False, "no verification command was given")
@@ -72,13 +83,18 @@ def run_verification(command: str, workspace: Path, settings: Settings) -> Verif
             cwd=str(workspace),
             capture_output=True,
             text=True,
-            timeout=settings.verify_timeout,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        limit = (
+            f"DSA_VERIFY_TIMEOUT ({settings.verify_timeout:g}s)"
+            if timeout >= settings.verify_timeout
+            else f"the run's remaining deadline ({timeout:g}s)"
+        )
         return VerificationResult(
             command,
             False,
-            f"timed out after DSA_VERIFY_TIMEOUT ({settings.verify_timeout:g}s)",
+            f"timed out after {limit}",
             duration_seconds=time.time() - started,
         )
     except OSError as exc:

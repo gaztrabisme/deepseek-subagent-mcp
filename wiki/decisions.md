@@ -315,3 +315,21 @@ because the stdio test client advertised neither — so the escalation path had 
 The payload handed over in both cases: tool, workspace, policy reason, and structured facts —
 `command_length: 25`, `compound: true`, `programs: ["echo", "echo"]`. No command text, no prose.
 The test asserts that directly.
+
+## D19 — The pipeline must finish before the reaper acts
+
+Two races, found by reading the run pipeline rather than by a failure:
+
+**A verification subprocess can outlive its run.** `agent.close()` joins the worker thread with a
+15-second timeout, and the kill it performs reaches the runtime subprocess, not a subprocess the
+worker thread is itself blocked in. With `DSA_VERIFY_TIMEOUT` at 300s and a run deadline expiring
+mid-check, the reaper would declare the run over while the check kept running. Verification is now
+capped by the run's own remaining deadline; the shorter of the two wins.
+
+**A closed agent could be evicted with work in flight.** `_evict_closed` archived terminal runs
+and dropped the agent — but if the thread join had timed out, a non-terminal run went with it, and
+`find_run` reported it unknown while it was still live. Eviction now requires every run to be
+terminal, and retries on the next reaper pass otherwise.
+
+Neither had been observed. Both are the kind that surface once, in production, as a run that
+vanished.

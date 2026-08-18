@@ -536,6 +536,31 @@ def test_a_finished_run_survives_its_agent_being_reaped(tmp_path):
         registry.agent(agent.agent_id)
 
 
+def test_a_closed_agent_with_work_in_flight_is_not_evicted(tmp_path):
+    """close() joins with a timeout, so a run can outlast the kill.
+
+    Evicting the agent while its worker is still going would drop a run that has
+    not finished, and find_run would report it unknown while it was still live.
+    """
+    settings = make_settings(tmp_path, idle_timeout=0.01)
+    registry = Registry(settings, start_reaper=False)
+    agent = registry.create_agent(None, settings.workspace, settings.model)
+    assert agent.wait_ready(5) is None
+    harness = FakeHarness.instances[-1]
+    harness.gate.clear()  # the worker will block inside session.run
+    run = agent.submit("slow", verification="true")
+    time.sleep(0.2)
+
+    agent._closed = True  # simulate close() giving up on the thread join
+    registry._evict_closed()
+    assert registry.find_run(run.run_id) is run, "an in-flight run was evicted"
+
+    harness.gate.set()
+    wait_for(run)
+    registry._evict_closed()
+    assert registry.find_run(run.run_id) is run  # now archived, still readable
+
+
 def test_the_archive_is_bounded(tmp_path):
     settings = make_settings(tmp_path, idle_timeout=0.01, run_archive=2, max_agents=5)
     registry = Registry(settings, start_reaper=False)

@@ -196,7 +196,7 @@ Every setting is an environment variable on the server process.
 | `DSA_RUN_ARCHIVE` | `200` | Finished runs kept readable after their agent is reaped. |
 | `DSA_SUMMARY_TOKENS` | `2000` | Result size above which the child is asked to distil. |
 | `DSA_CHARS_PER_TOKEN` | `3.5` | Conversion used for that cap. Measured at 3.54 on this workload. |
-| `DSA_VERIFY_TIMEOUT` | `300` | Seconds the verification command may run. |
+| `DSA_VERIFY_TIMEOUT` | `300` | Seconds the verification command may run, capped by the run's remaining deadline. |
 | `DSA_SUPERVISOR` | `auto` | `auto` / `sampling` / `elicitation` / `off`. |
 | `DSA_SUPERVISOR_TIMEOUT` | `120` | Seconds to wait for a verdict before denying. |
 | `DSA_SANDBOX_MODE` | `workspace-write` | `read-only`, `workspace-write`, or `danger-full-access`. |
@@ -237,7 +237,7 @@ These come from the Harness SDK wire protocol, not from choices made here.
 
 ```sh
 uv sync
-uv run pytest                  # 121 tests, no API key, no network
+uv run pytest                  # 124 tests, no API key, no network
 uv run ruff check .
 uv run deepseek-subagent-mcp   # starts on stdio; a client drives it
 ```

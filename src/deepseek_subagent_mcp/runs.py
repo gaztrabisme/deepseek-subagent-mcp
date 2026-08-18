@@ -618,7 +618,10 @@ class Agent:
         if run.verification:
             run.phase = PHASE_VERIFYING
             run.verification_result = run_verification(
-                run.verification, self.workspace, self.settings
+                run.verification,
+                self.workspace,
+                self.settings,
+                budget=(run.deadline - _now()) if run.deadline else None,
             )
             log.info(
                 "run %s verification %s: %s",
@@ -770,11 +773,16 @@ class Registry:
     def _evict_closed(self) -> None:
         """Drop closed agents, keeping their finished runs readable."""
         with self._lock:
-            closed = [a for a in self._agents.values() if a.closed]
+            # An agent whose worker is still in flight keeps its slot for now.
+            # close() joins the thread with a timeout, so a run can outlast the
+            # kill -- evicting it here would lose a run that is still going.
+            closed = [
+                a for a in self._agents.values()
+                if a.closed and all(r.state in TERMINAL_STATES for r in a.runs())
+            ]
             for agent in closed:
                 for run in agent.runs():
-                    if run.state in TERMINAL_STATES:
-                        self._archive[run.run_id] = run
+                    self._archive[run.run_id] = run
                 self._agents.pop(agent.agent_id, None)
             while len(self._archive) > self.settings.run_archive:
                 self._archive.popitem(last=False)
